@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Cyberpunk Boxing: v16.1 New Server</title>
+    <title>Cyberpunk Boxing: v16.2 Final</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+TC:wght@400;700&display=swap');
 
@@ -26,7 +26,6 @@
         }
         canvas { display: block; width: 100%; height: 100%; touch-action: none; }
         
-        /* UI 層 */
         .ui-layer {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(5,5,12,0.95); display: flex; flex-direction: column;
@@ -126,7 +125,7 @@
         <button class="btn-menu" onclick="startGame('single')">單人闖關 (PvE)</button>
         <button id="btn-multi" class="btn-menu" disabled onclick="showLobby()">多人連線 (PvP)</button>
         <button class="btn-menu btn-secondary" onclick="toggleRules()">操作說明</button>
-        <div style="margin-top: 30px; font-size: 12px; color: #555;">v16.1 New Server</div>
+        <div style="margin-top: 30px; font-size: 12px; color: #555;">v16.2 Leave Room Fix</div>
     </div>
 
     <!-- UI: 大廳 -->
@@ -147,7 +146,7 @@
             <div id="room-code-display" class="room-code-display" onclick="copyRoomCode()" title="點擊複製">----</div>
             <p style="color:#aaa; font-size:14px; margin-bottom: 30px;">請將代碼分享給對手 (點擊號碼複製)</p>
             
-            <button id="btn-cancel" class="btn-menu btn-exit">❌ 退出房間</button>
+            <button id="btn-cancel" class="btn-menu btn-exit">❌ 退出房間 (Exit)</button>
         </div>
     </div>
 
@@ -249,7 +248,6 @@
 
 <!-- Firebase 連線 -->
 <script type="module">
-    // [Updated Config] 使用您的新伺服器設定
     const myFirebaseConfig = {
       apiKey: "AIzaSyD2z36SmzFDnG9OFl8X8RjFzWGDmzFRoic",
       authDomain: "boxing-68f1c.firebaseapp.com",
@@ -338,10 +336,14 @@
                 unsubscribeRoom = onSnapshot(getRef(code), (snap) => { if(snap.exists()) window.handleSync(snap.data(), window.myRole); });
             }
 
+            // [修復] 離開房間時，強制關閉房間狀態
             window.leaveRoom = async () => {
                 if (unsubscribeRoom) { unsubscribeRoom(); unsubscribeRoom = null; }
-                if (window.currentRoomId && window.myRole === 'p1') {
-                    try { await updateDoc(getRef(window.currentRoomId), { status: 'closed' }); } catch(e) {}
+                if (window.currentRoomId) {
+                    try { 
+                        // 不管是 P1 或 P2 離開，都將房間標記為關閉，讓對方知道
+                        await updateDoc(getRef(window.currentRoomId), { status: 'closed' }); 
+                    } catch(e) {}
                 }
                 location.reload();
             };
@@ -469,7 +471,6 @@ const BTNS = [
 
 window.gameMode = 'single';
 
-// [修復] 確保所有全域函式都定義
 window.restartGameLocal = () => { startGame('single'); };
 window.confirmSurrender = function() {
     if (!confirm("確定要投降嗎？")) return;
@@ -509,6 +510,7 @@ window.startGame = (m) => {
         const badge = document.getElementById('player-badge'); badge.style.display = 'block';
         badge.innerText = (window.myRole === 'p1') ? "你是: P1 (藍方)" : "你是: P2 (紅方)";
         badge.style.borderColor = (window.myRole === 'p1') ? CLR.BLUE : CLR.RED;
+        badge.style.left = '50%'; badge.style.transform = 'translateX(-50%)'; // 置中
     }
 };
 
@@ -563,11 +565,7 @@ window.handleSync = (data, role) => {
                 turnStartTime = Date.now();
             }
             p1.en = data.p1_en; p2.en = data.p2_en;
-            if(!myAct) {
-                 msg = "你的回合：請選擇行動"; 
-                 if (turnTimer <= 0) turnTimer = TURN_LIMIT; 
-            }
-            else msg = "已鎖定，等待對手...";
+            if(!myAct) msg = "你的回合：請選擇行動"; else msg = "已鎖定，等待對手...";
         }
     }
 };
@@ -593,7 +591,7 @@ function setState(p,act){
     if(act==='charge')p.state='charge';else if(act==='block')p.state='block';else if(act==='s_block')p.state='s_block';else if(act.includes('skill')||act==='attack')p.state='attack';else p.state='idle';
 }
 
-// [新增] 自動出招邏輯
+// 自動出招邏輯
 function autoPickMove(p) {
     let opts = ["attack","block"];
     if(p.en>=1)opts.push("skill1"); if(p.en>=2)opts.push("skill2"); if(p.en>=3)opts.push("skill3"); if(p.en==0)opts.push("charge");
@@ -630,6 +628,7 @@ function loop() {
             ctx.fillStyle = timeLeft <= 5 ? "#ff3333" : "#ffe600";
             ctx.font = "bold 40px Orbitron";
             ctx.textAlign = "center";
+            // 計時器位置：置中，P1/P2 標籤上方
             ctx.fillText(Math.ceil(timeLeft), 450, 130); 
             
             if (timeLeft <= 0 && active) {
@@ -662,14 +661,13 @@ function loop() {
                 document.getElementById('btn-surrender').classList.add('hidden');
             } else {
                 state = ST.INPUT; msg = "下一回合";
-                turnStartTime = Date.now(); // 重置
+                turnStartTime = Date.now(); // [Fix] 重置
                 if(window.gameMode==='multi' && window.syncState) window.syncState({p1_hp:p1.hp, p1_en:p1.en, p2_hp:p2.hp, p2_en:p2.en});
             }
             if(window.gameMode === 'multi') applyServerData();
         }
     }
 
-    // [Layout Fix] HUD 畫在下面一點 (80)
     drawHUD(20,80,p1,CLR.BLUE,"PLAYER 1"); drawHUD(660,80,p2,CLR.RED,"PLAYER 2");
     ctx.fillStyle=CLR.WHT; ctx.font="bold 24px 'Noto Sans TC'"; ctx.textAlign="center"; ctx.fillText(msg,450,40); // 訊息放上面
     requestAnimationFrame(loop);
@@ -699,7 +697,7 @@ function drawHUD(x,y,p,c,n){
 function resolveTurn() {
     if(p1.hp<=0||p2.hp<=0) return;
     
-    // [Fix] 使用統一變數
+    // [Fix v14.1] 移除二次扣能
     if(["attack","skill1","skill2","skill3"].includes(p1Act)){
         let dmg=DMG[p1Act], blk=false;
         if(p1Act==="skill3"){if(p2Act==="s_block")blk=true;}else{if(p2Act==="block")blk=true;}
